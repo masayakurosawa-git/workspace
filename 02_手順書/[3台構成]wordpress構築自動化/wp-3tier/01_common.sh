@@ -41,47 +41,6 @@ run_with_spinner() {
 
 
 # DNS向き先設定
-# set_dns_resolver() {
-#   local dns1="$1"
-#   local dns2="${2:-}"
-
-#   echo "==> Set DNS resolver ${dns1} ${dns2}"
-
-#   # タイムスタンプ
-#   local ts
-#   ts=$(date +%Y%m%d_%H%M%S)
-
-#   # immutable解除（失敗しても継続）
-#   sudo chattr -i /etc/resolv.conf 2>/dev/null || true
-
-#   # バックアップ作成
-#   if [ -f /etc/resolv.conf ]; then
-#     sudo cp -a /etc/resolv.conf /etc/resolv.conf.${ts}.bak
-#     echo "==> Backup created: /etc/resolv.conf.${ts}.bak"
-#   fi
-
-#   # resolv.conf 作成
-#   if [ -n "$dns2" ]; then
-#     sudo bash -c "cat > /etc/resolv.conf <<EOF
-# nameserver ${dns1}
-# nameserver ${dns2}
-# EOF"
-#   else
-#     sudo bash -c "cat > /etc/resolv.conf <<EOF
-# nameserver ${dns1}
-# EOF"
-#   fi
-
-#   # 固定（できない環境もあるので失敗してもOK）
-#   if sudo chattr +i /etc/resolv.conf 2>/dev/null; then
-#     echo "==> /etc/resolv.conf locked (immutable)"
-#   else
-#     echo "==> WARN: chattr not supported; /etc/resolv.conf may be overwritten by DHCP"
-#   fi
-
-#   echo "==> /etc/resolv.conf updated and locked"
-# }
-
 set_dns_resolver() {
   local dns1="$1"
   local domain="$2"
