@@ -1,0 +1,2 @@
+# community.mysql がターゲット上で MySQL/MariaDB に接続するために必要
+PyMySQL>=1.1.0

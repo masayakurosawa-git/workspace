@@ -1,0 +1,46 @@
+---
+# 実行順を 99_run_all.sh と同じに担保：DB → AP → WEB → 内部DNS
+
+- name: 01) DB (common -> db)
+  hosts: db
+  become: true
+  gather_facts: true
+  vars:
+    ansible_user: "{{ ssh_user }}"
+    resolver_dns: "{{ inner_dns_private_ip }}"
+  roles:
+    - role: common
+    - role: db
+
+- name: 02) AP (common -> ap)
+  hosts: ap
+  become: true
+  gather_facts: true
+  vars:
+    ansible_user: "{{ ssh_user }}"
+    resolver_dns: "{{ inner_dns_private_ip }}"
+  roles:
+    - role: common
+    - role: ap
+
+- name: 03) WEB (common -> web)
+  hosts: web
+  become: true
+  gather_facts: true
+  vars:
+    ansible_user: "{{ ssh_user }}"
+    resolver_dns: "{{ inner_dns_private_ip }}"
+  roles:
+    - role: common
+    - role: web
+
+- name: 04) INNER DNS (common -> inner_dns)
+  hosts: inner_dns
+  become: true
+  gather_facts: true
+  vars:
+    ansible_user: "{{ ssh_user }}"
+    resolver_dns: "{{ local_host }}"
+  roles:
+    - role: common
+    - role: inner_dns

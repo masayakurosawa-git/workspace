@@ -1,0 +1,137 @@
+---
+- name: Install MariaDB server (Amazon Linux 2023)
+  ansible.builtin.dnf:
+    name:
+      - mariadb105-server
+      - python3-pip
+    state: present
+
+- name: Ensure MariaDB enabled and started
+  ansible.builtin.systemd:
+    name: mariadb
+    enabled: true
+    state: started
+
+# community.mysql 用の PyMySQL をターゲットに入れる（冪等）
+- name: Install PyMySQL on target via pip
+  ansible.builtin.pip:
+    name: PyMySQL
+    state: present
+
+# mysql_secure_installation 相当（非対話・冪等）
+# 接続は unix socket + implicit admin で実施（初期状態の MariaDB を想定）
+- name: Check current MariaDB users (for idempotent decisions)
+  community.mysql.mysql_query:
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    check_implicit_admin: true
+    query: "SELECT User, Host, plugin FROM mysql.user;"
+  register: mariadb_users
+  changed_when: false
+  failed_when: false
+
+- name: Set root password only if not yet set to mysql_native_password with password
+  community.mysql.mysql_user:
+    name: root
+    host: localhost
+    password: "{{ mariadb_root_password }}"
+    plugin: mysql_native_password
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    check_implicit_admin: true
+  register: set_root_pw_result
+  failed_when: false
+
+- name: Fail with details if root password setting failed unexpectedly
+  ansible.builtin.fail:
+    msg: >-
+      root パスワード設定で失敗しました。
+      rc/err: {{ set_root_pw_result.msg | default('n/a') }}
+      現在のユーザ一覧: {{ mariadb_users.query_result | default('n/a') }}
+      対処: MariaDB の初期状態（unix_socket認証など）を確認し、plugin/hostを調整してください。
+  when:
+    - set_root_pw_result is failed
+
+# 以降は root パスワードが付いている前提でも、implicit_admin 経由でも動くよう両対応
+- name: Remove anonymous MySQL users
+  community.mysql.mysql_user:
+    name: ""
+    host_all: true
+    state: absent
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+
+- name: Disallow remote root login (remove root@%)
+  community.mysql.mysql_user:
+    name: root
+    host: "%"
+    state: absent
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+
+- name: Remove test database
+  community.mysql.mysql_db:
+    name: test
+    state: absent
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+
+- name: Flush privileges
+  community.mysql.mysql_query:
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    query: "FLUSH PRIVILEGES;"
+
+# WordPress 用 DB / User（host は AP_PRIVATE_IP を踏襲）
+- name: Create WordPress database (if not exists)
+  community.mysql.mysql_db:
+    name: "{{ wp_db_name }}"
+    state: present
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+
+- name: Create WordPress user and grant privileges
+  community.mysql.mysql_user:
+    name: "{{ wp_db_user }}"
+    host: "{{ ap_private_ip }}"
+    password: "{{ wp_db_pass }}"
+    priv: "{{ wp_db_name }}.*:ALL"
+    state: present
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+
+- name: Flush privileges after grants
+  community.mysql.mysql_query:
+    login_user: root
+    login_password: "{{ mariadb_root_password }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    query: "FLUSH PRIVILEGES;"
+
+# トラブルシュート用
+- name: (troubleshoot) mariadb status
+  ansible.builtin.command: systemctl status mariadb --no-pager -l
+  register: mariadb_status
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show mariadb status
+  ansible.builtin.debug:
+    var: mariadb_status.stdout_lines
+  tags: [troubleshoot]
+
+- name: (troubleshoot) tail mariadb log (journal)
+  ansible.builtin.command: journalctl -u mariadb -n 200 --no-pager
+  register: mariadb_journal
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show mariadb journal
+  ansible.builtin.debug:
+    var: mariadb_journal.stdout_lines
+  tags: [troubleshoot]

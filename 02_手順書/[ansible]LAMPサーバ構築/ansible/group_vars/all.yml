@@ -1,0 +1,47 @@
+# =========
+# 唯一のパラメータ集約ファイル（ここだけ修正すれば環境を変えられる）
+# =========
+
+# SSH
+ssh_user: ec2-user
+
+# Public IP（inventory には host 定義だけを書く方針だが、00_env.sh 踏襲のため保持）
+web_public_ip: "18.237.80.150"
+ap_public_ip: "52.43.125.127"
+db_public_ip: "52.11.62.134"
+inner_dns_public_ip: "35.85.64.133"
+
+# Private IP（サーバ間通信）
+web_private_ip: "172.31.23.104"
+ap_private_ip: "172.31.18.19"
+db_private_ip: "172.31.26.139"
+inner_dns_private_ip: "172.31.31.220"
+
+local_host: "127.0.0.1"
+
+# WordPress / DB
+wp_db_name: "wordpress_db" # 「-」は使用しないこと
+wp_db_user: "kurosawa"
+wp_db_pass: "kurosawa"
+
+# MariaDB hardening 用（mysql_secure_installation 相当）
+# ※rootパスワードは「未設定時のみ」設定されるように実装
+mariadb_root_password: "ChangeMe_StrongRootPass"
+
+# ドメイン（内部）
+domain_name_inner: "wp.local"
+
+# サブドメイン（組み立てでもOK）
+sub_domain_ap: "ap.{{ domain_name_inner }}"
+sub_domain_db: "db.{{ domain_name_inner }}"
+sub_domain_web: "web.{{ domain_name_inner }}"
+
+# WordPress ダウンロード URL
+wordpress_tarball_url: "https://wordpress.org/latest.tar.gz"
+
+# 共通：dnf upgrade 実行可否（演習環境で時間短縮したい場合 false）
+common_dnf_upgrade: true
+
+# 共通：DNS resolver 設定（systemd-resolved）
+# play 側で resolver_dns を渡す前提（inner_dns は localhost、それ以外は inner_dns_private_ip）
+resolver_domains: "{{ domain_name_inner }}"

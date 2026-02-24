@@ -1,0 +1,13 @@
+$TTL 86400
+@   IN  SOA ns.{{ domain_name_inner }}. root.{{ domain_name_inner }}. (
+        {{ zone_serial }} ; Serial
+        3600       ; Refresh
+        1800       ; Retry
+        604800     ; Expire
+        86400 )    ; Minimum
+
+@   IN  NS  ns.{{ domain_name_inner }}.
+ns  IN  A   {{ inner_dns_private_ip }}
+ap  IN  A   {{ ap_private_ip }}
+web IN  A   {{ web_private_ip }}
+db  IN  A   {{ db_private_ip }}
