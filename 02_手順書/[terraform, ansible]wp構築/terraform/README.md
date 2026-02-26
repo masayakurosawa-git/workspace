@@ -1,160 +1,228 @@
-# wp3tier - EC2 4台 (WEB/AP/DB/INNER_DNS) Terraform
+# Terraform + Ansible 自動構築環境
+</br>
 
-## 目的
-- AWS 上に EC2 を4台自動構築する（OS内の構築は不要）
-- `terraform apply` 後に `./00_env.sh` の8変数だけを自動更新（バックアップ作成）
-- `var.run_after_apply=true` のときのみ `./99_run_all.sh` をローカル実行する
-  - `99_run_all.sh` は `00_env.sh` を source して動作する前提
+## 🎯 目的
+本プロジェクトは、Terraform と Ansible を用いて  
+以下の構成を **完全自動構築すること** を目的としています。
+
+### 構成
+
+- WEB サーバ（Apache + WordPress）
+- AP サーバ
+- DB サーバ（MariaDB）
+- 内部 DNS サーバ
+
+Terraform で AWS インフラを構築し、  
+Ansible によって各サーバのセットアップを自動実行します。
 
 ---
 </br>
 </br>
 
 
-## 前提
+## 🏗 アーキテクチャ
+```
+Terraform
+├── EC2 × 4台 作成
+├── SecurityGroup 作成
+├── 実行端末のグローバルIPを自動取得
+└── Ansible 実行
 
+Ansible
+├── WEBロール
+├── APロール
+├── DBロール
+└── 内部DNSロール
+```
+---
+</br>
+</br>
+
+
+## 🖥 必要環境
+### ローカル環境
+
+- macOS / Linux
 - Terraform >= 1.5
-- AWS認証情報（例: `aws configure` / 環境変数 / SSO 等）
-- 既存EC2 KeyPair 名が必要（`ssh_key_name`）
+- Ansible >= 2.12
+- OpenSSH
+- AWS CLI（認証済み）
 
+### AWS 側
+
+- IAMユーザー（EC2作成権限あり）
+- キーペア（例: `kurosawa_terraform.pem`）
 ---
 </br>
 </br>
 
 
-## 使い方
-
-### 1) 変数を用意（例: terraform.tfvars）
-
-```hcl
-aws_region      = "ap-northeast-1"
-instance_type   = "t3.micro"
-project_name    = "wp3tier"
-
-ssh_key_name    = "YOUR_KEYPAIR_NAME"
-
-# 自分のグローバルIP（/32）
-my_ip_cidr      = "203.0.113.10/32"
-
-# DNS TCP 53 を許可したい「自分のネットワークCIDR」
-# 例: 自宅LANが 192.168.0.0/24 ならこれ
-my_network_cidr = "192.168.0.0/24"
-
-# apply後に 99_run_all.sh も実行したい場合のみ true
-run_after_apply = false
+## ⚙ 事前セットアップ
+### 1️⃣ AWS 認証
+```bash
+aws configure
+または
+export AWS_PROFILE=xxx
 ```
 
-### 2) init / apply
+### 2️⃣ SSH鍵確認
 ```bash
-# 初期化
+ls ~/.ssh/kurosawa_terraform.pem
+chmod 600 ~/.ssh/kurosawa_terraform.pem
+```
+
+### 3️⃣ 実行端末IP自動取得機能
+本プロジェクトでは、
+```bash
+https://checkip.amazonaws.com
+```
+を利用して、実行端末のグローバルIPを取得し、
+
+SecurityGroup の SSH許可IP として自動設定します。
+
+固定IPを利用したい場合は：
+```bash
+terraform apply -var="my_ip_cidr=xxx.xxx.xxx.xxx/32"
+```
+---
+</br>
+</br>
+
+
+## 🚀 実行手順
+① 初期化
+```bash
 terraform init
+```
 
-# 事前確認
+② プラン確認
+```bash
 terraform plan
+```
 
-# 実行(yes の入力省略)
+③ インフラ構築
+```bash
 terraform apply -auto-approve
-#　ネットワークを固定したしたいとき
-terraform apply -auto-approve -var="my_ip_cidr=203.0.113.10/32"
+```
 
-# クリーンな状態に戻す(yes の入力省略)
+④ Ansible実行（構築含む）
+```bash
+terraform apply -auto-approve -var="run_after_apply=true"
+```
+---
+</br>
+</br>
+
+
+## ⏳ SSH待機処理
+EC2起動直後は SSH がまだリッスンしていない場合があります。
+
+そのため以下の処理を実装しています：
+```bash
+wait_for_ssh.sh
+```
+22番ポートが開くまで待機してから Ansible を実行します。
+
+---
+</br>
+</br>
+
+
+## 🌐 動作確認
+
+apply 完了後、ターミナルに以下が表示されます。
+
+```bash
+🚀 Deployment Completed Successfully!
+
+WordPress URL:
+http://<WEB_PUBLIC_IP>/
+
+Admin:
+http://<WEB_PUBLIC_IP>/wp-admin/
+```
+
+ブラウザでアクセスしてください。
+
+---
+</br>
+</br>
+
+
+## 🔍 トラブルシューティング
+**SSH Connection refused**
+
+→ EC2起動直後の可能性
+
+→ wait_for_ssh が動作しているか確認
+
+---
+
+**SSH timeout**
+
+→ SecurityGroup の IP 制限を確認
+
+→ terraform output my_ip_cidr_effective で確認
+
+---
+
+**Ansible unreachable**
+
+→ inventory のIP確認
+
+→ 手動SSHで疎通確認
+
+---
+</br>
+</br>
+
+
+## 🧹 破棄
+作成したEC2やセキュリティグループを削除します。
+```bash
 terraform destroy -auto-approve
 ```
-
-apply の最後に以下が順番に実行されます:
-
-1. `scripts/update_env.sh`（必ず実行）
-
-    - `./00_env.sh` を `./00_env.sh.bak_YYYYmmdd_HHMMSS` にバックアップ
-    - 8変数だけを上書き更新（他の変数は保持）
-
-2. `./99_run_all.sh`（`run_after_apply=true` のときだけ実行）
-
----
-</br>
-</br>
-
-## 00_env.sh で更新される変数
-**Public**
-- WEB_PUBLIC_IP
-- AP_PUBLIC_IP
-- DB_PUBLIC_IP
-- INNER_DNS_PUBLIC_IP
-
-**Private**
-- WEB_PRIVATE_IP
-- AP_PRIVATE_IP
-- DB_PRIVATE_IP
-- INNER_DNS_PRIVATE_IP
-
-その他の変数（SSH_USER / SSH_KEY_PATH / WP_DB_NAME 等）は保持されます。
-
 ---
 </br>
 </br>
 
 
-## セキュリティグループ仕様（要件どおり）
-**共通（全SG）:**
-
-- inbound: SSH 22/tcp を `my_ip_cidr` のみ許可
-
-- outbound: all allow
-
-**WEB SG:**
-
-- inbound: HTTP 80/tcp を `my_ip_cidr` のみ許可（0.0.0.0/0は禁止）
-
-**AP SG:**
-
-- inbound: TCP 9000 を WEB SG からのみ許可（CIDRでなく SG参照）
-
-**DB SG:**
-
-- inbound: MySQL 3306/tcp を AP SG からのみ許可（SG参照）
-
-**INNER_DNS SG:**
-
-- inbound: DNS 53/udp を 0.0.0.0/0 から許可
-
-- inbound: DNS 53/tcp を `my_network_cidr` のみ許可
-
----
-</br>
-</br>
-
-
-## outputs
+## 📁 ディレクトリ構成
 ```bash
-terraform output
-terraform output -json
+terraform/
+ ├── main.tf
+ ├── variables.tf
+ ├── outputs.tf
+ ├── ip_auto.tf
+ ├── ansible/
+ │    ├── inventory/
+ │    ├── roles/
+ │    └── site.yml
+ └── scripts/
+      ├── update_ansible_files.sh
+      └── wait_for_ssh.sh
 ```
-各EC2の Public/Private IP を出力します。
-
 ---
 </br>
 </br>
 
 
-## 注意点（mac / linux差分など）
-- `scripts/update_env.sh` は `python3` を使って `terraform output -json` を解析します。
-
-    - macOS / Linux ともに python3 が入っていれば動きます（Homebrew等で導入可）
-
-- `00_env.sh` の該当8変数が存在しない場合は末尾に追記します。
-
-- `subnet_id` は指定していません（既定VPC/既定サブネットの挙動に任せます）。
-
-    - もし「既定サブネットで public IP が付かない」環境の場合、
-    AWS 側の Default Subnet の Auto-assign public IPv4 設定を確認してください。
-
+## 🧠 設計思想
+- Terraform apply 中に terraform output を再実行しない設計
+- 環境変数による IP 受け渡し
+- SSH待機による安定実行
+- 成功時のみURL表示（set -e）
 ---
 </br>
 </br>
 
 
-## 補足（設計意図：冪等性 / 実行順）
-- `null_resource.update_env` は **4台のIPが変わったときだけ** 再実行されます（`triggers` にIPを持たせているため）。
-- `null_resource.run_all` は `run_after_apply=true` のときだけ作成され、**必ず update_env の後に** 実行されます（`depends_on`）。
-
+## 🔒 セキュリティ
+- SSH は実行端末IPのみ許可
+- 固定IP指定可能
+- StrictHostKeyChecking 無効化（開発用）
 ---
+</br>
+</br>
+
+
