@@ -1,0 +1,144 @@
+---
+- name: Install bind/named packages
+  ansible.builtin.dnf:
+    name:
+      - bind
+      - bind-utils
+    state: present
+
+- name: Ensure named enabled and started
+  ansible.builtin.systemd:
+    name: named
+    enabled: true
+    state: started
+
+- name: Compute zone serial (YYYYMMDD01)
+  ansible.builtin.set_fact:
+    zone_serial: "{{ (ansible_date_time.date | regex_replace('-', '')) ~ '01' }}"
+
+- name: Create zone file with backup
+  ansible.builtin.template:
+    src: zone.j2
+    dest: "/var/named/{{ domain_name_inner }}.zone"
+    owner: root
+    group: named
+    mode: "0644"
+    backup: true
+  notify: restart named
+
+# named.conf 修正（40_inner_dns_setup.sh の listen-on コメントアウト/allow-query any/zone 追加を冪等化）
+- name: Backup named.conf explicitly (extra safety)
+  ansible.builtin.copy:
+    src: /etc/named.conf
+    dest: "/etc/named.conf.ansible_{{ ansible_date_time.iso8601_basic_short }}.bak"
+    remote_src: true
+    mode: "0644"
+  changed_when: false
+
+# - name: Comment out listen-on 127.0.0.1 (idempotent)
+#   ansible.builtin.replace:
+#     path: /etc/named.conf
+#     regexp: '^(\\s*)listen-on(\\s+port\\s+53\\s+\\{\\s*127\\.0\\.0\\.1;\\s*\\};)'
+#     replace: '\\1#listen-on\\2'
+#     backup: true
+#   notify: restart named
+
+# - name: Comment out listen-on-v6 ::1 (idempotent)
+#   ansible.builtin.replace:
+#     path: /etc/named.conf
+#     regexp: '^(\\s*)listen-on-v6(\\s+port\\s+53\\s+\\{\\s*::1;\\s*\\};)'
+#     replace: '\\1#listen-on-v6\\2'
+#     backup: true
+#   notify: restart named
+
+  # --- Ensure named listens on any (IPv4) ---
+- name: Ensure listen-on port 53 { any; } in options block
+  ansible.builtin.lineinfile:
+    path: /etc/named.conf
+    regexp: '^\s*listen-on\s+port\s+53\s+\{'
+    line: '    listen-on port 53 { any; };'
+    insertafter: '^\s*options\s*\{'
+    backup: true
+  notify: restart named
+
+# --- Ensure named listens on any (IPv6) ---
+- name: Ensure listen-on-v6 port 53 { any; } in options block
+  ansible.builtin.lineinfile:
+    path: /etc/named.conf
+    regexp: '^\s*listen-on-v6\s+port\s+53\s+\{'
+    line: '    listen-on-v6 port 53 { any; };'
+    insertafter: '^\s*options\s*\{'
+    backup: true
+  notify: restart named
+
+# --- Ensure named allow query any ---
+- name: Ensure allow-query any exists inside options block
+  ansible.builtin.lineinfile:
+    path: /etc/named.conf
+    insertafter: '^\s*options\s*\{'
+    regexp: '^\s*allow-query\s*\{'
+    line: '    allow-query     { any; };'
+    backup: true
+  notify: restart named
+
+- name: Ensure zone definition exists (managed block)
+  ansible.builtin.blockinfile:
+    path: /etc/named.conf
+    marker: "// {mark} ANSIBLE MANAGED ZONE {{ domain_name_inner }}"
+    block: |
+      zone "{{ domain_name_inner }}" IN {
+          type master;
+          file "{{ domain_name_inner }}.zone";
+      };
+    backup: true
+  notify: restart named
+
+- name: Validate named.conf (named-checkconf)
+  ansible.builtin.command: named-checkconf /etc/named.conf
+  register: named_checkconf
+  changed_when: false
+
+- name: Fail with named-checkconf output if invalid
+  ansible.builtin.fail:
+    msg: >-
+      named-checkconf で設定不整合が検出されました。
+      stdout: {{ named_checkconf.stdout | default('') }}
+      stderr: {{ named_checkconf.stderr | default('') }}
+  when: named_checkconf.rc != 0
+
+# トラブルシュート用
+- name: (troubleshoot) named status
+  ansible.builtin.command: systemctl status named --no-pager -l
+  register: named_status
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show named status
+  ansible.builtin.debug:
+    var: named_status.stdout_lines
+  tags: [troubleshoot]
+
+- name: (troubleshoot) named-checkzone
+  ansible.builtin.command: "named-checkzone {{ domain_name_inner }} /var/named/{{ domain_name_inner }}.zone"
+  register: named_checkzone
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show named-checkzone
+  ansible.builtin.debug:
+    var: named_checkzone.stdout_lines
+  tags: [troubleshoot]
+
+- name: (troubleshoot) tail named journal
+  ansible.builtin.command: journalctl -u named -n 200 --no-pager
+  register: named_journal
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show named journal
+  ansible.builtin.debug:
+    var: named_journal.stdout_lines
+  tags: [troubleshoot]

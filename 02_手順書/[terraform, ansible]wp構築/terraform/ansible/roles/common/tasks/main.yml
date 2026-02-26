@@ -1,0 +1,68 @@
+---
+- name: Assert required resolver variables are provided
+  ansible.builtin.assert:
+    that:
+      - resolver_dns is defined
+      - resolver_domains is defined
+      - resolver_domains | length > 0
+    fail_msg: >-
+      resolver_dns / resolver_domains が未定義です。
+      site.yml の各 Play で resolver_dns を渡してください。
+    success_msg: "resolver_dns/resolver_domains OK"
+
+- name: Optionally dnf upgrade (common_dnf_upgrade=true)
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+  when: common_dnf_upgrade | bool
+
+- name: Install common packages
+  ansible.builtin.dnf:
+    name:
+      - wget
+      - policycoreutils-python-utils
+    state: present
+
+# systemd-resolved の DNS 向き先設定（01_common.sh の set_dns_resolver を Ansible 化）
+- name: Configure systemd-resolved DNS (backup included)
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/resolved.conf
+    regexp: "^#?DNS="
+    line: "DNS={{ resolver_dns }}"
+    backup: true
+  notify: restart systemd-resolved
+
+- name: Clear FallbackDNS (backup included)
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/resolved.conf
+    regexp: "^#?FallbackDNS="
+    line: "FallbackDNS="
+    backup: true
+  notify: restart systemd-resolved
+
+- name: Configure systemd-resolved Domains (backup included)
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/resolved.conf
+    regexp: "^#?Domains="
+    line: "Domains={{ resolver_domains }}"
+    backup: true
+  notify: restart systemd-resolved
+
+- name: Ensure systemd-resolved is enabled and running
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    enabled: true
+    state: started
+
+# トラブルシュート用（通常実行では動かさない）
+- name: (troubleshoot) Show resolved status
+  ansible.builtin.command: resolvectl status
+  register: resolved_status
+  changed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) Print resolved status
+  ansible.builtin.debug:
+    var: resolved_status.stdout_lines
+  tags: [troubleshoot]

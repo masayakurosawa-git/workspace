@@ -1,0 +1,154 @@
+---
+- name: Install PHP packages for php-fpm
+  ansible.builtin.dnf:
+    name:
+      - wget
+      - tar
+      - php-fpm
+      - php-mysqli
+      - php-json
+      - php
+      - php-devel
+      - php-mysqlnd
+      - php-gd
+    state: present
+
+- name: Backup www.conf explicitly (extra safety)
+  ansible.builtin.copy:
+    src: /etc/php-fpm.d/www.conf
+    dest: "/etc/php-fpm.d/www.conf.ansible_{{ ansible_date_time.iso8601_basic_short }}.bak"
+    remote_src: true
+    mode: "0644"
+  changed_when: false
+
+- name: Configure php-fpm user=apache (backup included)
+  ansible.builtin.lineinfile:
+    path: /etc/php-fpm.d/www.conf
+    regexp: "^user\\s*=\\s*"
+    line: "user = apache"
+    backup: true
+  notify: restart php-fpm
+
+- name: Configure php-fpm group=apache (backup included)
+  ansible.builtin.lineinfile:
+    path: /etc/php-fpm.d/www.conf
+    regexp: "^group\\s*=\\s*"
+    line: "group = apache"
+    backup: true
+  notify: restart php-fpm
+
+- name: Configure php-fpm listen=9000 (backup included)
+  ansible.builtin.lineinfile:
+    path: /etc/php-fpm.d/www.conf
+    regexp: "^listen\\s*=\\s*"
+    line: "listen = 9000"
+    backup: true
+  notify: restart php-fpm
+
+- name: Configure php-fpm listen.allowed_clients={{ web_private_ip }} (backup included)
+  ansible.builtin.lineinfile:
+    path: /etc/php-fpm.d/www.conf
+    regexp: "^;?listen\\.allowed_clients\\s*=\\s*"
+    line: "listen.allowed_clients = {{ web_private_ip }}"
+    backup: true
+  notify: restart php-fpm
+
+- name: Ensure php-fpm enabled and started
+  ansible.builtin.systemd:
+    name: php-fpm
+    enabled: true
+    state: started
+
+- name: Enable SELinux boolean httpd_can_network_connect (persistent)
+  ansible.posix.seboolean:
+    name: httpd_can_network_connect
+    state: true
+    persistent: true
+
+# WordPress は WEB と同じパスに配置（Proxy先で SCRIPT_FILENAME が一致する前提）
+- name: Ensure /var/www/html is reset (remove existing)
+  ansible.builtin.file:
+    path: /var/www/html
+    state: absent
+
+- name: Recreate /var/www/html
+  ansible.builtin.file:
+    path: /var/www/html
+    state: directory
+    owner: apache
+    group: apache
+    mode: "0755"
+
+- name: Download WordPress tarball
+  ansible.builtin.get_url:
+    url: "{{ wordpress_tarball_url }}"
+    dest: /tmp/latest.tar.gz
+    mode: "0644"
+
+- name: Extract WordPress into /var/www/html
+  ansible.builtin.unarchive:
+    src: /tmp/latest.tar.gz
+    dest: /var/www/html
+    remote_src: true
+    extra_opts:
+      - --strip-components=1
+
+- name: Deploy wp-config.php (backup included)
+  ansible.builtin.template:
+    src: wp-config.php.j2
+    dest: /var/www/html/wp-config.php
+    owner: apache
+    group: apache
+    mode: "0644"
+    backup: true
+
+- name: Ensure permissions for /var/www/html
+  ansible.builtin.file:
+    path: /var/www/html
+    state: directory
+    owner: apache
+    group: apache
+    mode: "0755"
+    recurse: true
+
+- name: Create phpinfo page (info.php)
+  ansible.builtin.copy:
+    dest: /var/www/html/info.php
+    content: "<?php phpinfo(); ?>\n"
+    owner: apache
+    group: apache
+    mode: "0644"
+    backup: true
+
+# トラブルシュート用
+- name: (troubleshoot) php-fpm status
+  ansible.builtin.command: systemctl status php-fpm --no-pager -l
+  register: phpfpm_status
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show php-fpm status
+  ansible.builtin.debug:
+    var: phpfpm_status.stdout_lines
+  tags: [troubleshoot]
+
+- name: (troubleshoot) tail php-fpm log if exists
+  ansible.builtin.shell: |
+    set -e
+    if [ -f /var/log/php-fpm/error.log ]; then
+      tail -n 200 /var/log/php-fpm/error.log
+    else
+      echo "no /var/log/php-fpm/error.log"
+    fi
+  args:
+    executable: /bin/bash
+  register: phpfpm_log
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show php-fpm log
+  ansible.builtin.debug:
+    var: phpfpm_log.stdout_lines
+  tags: [troubleshoot]

@@ -1,0 +1,116 @@
+---
+- name: Install httpd
+  ansible.builtin.dnf:
+    name: httpd
+    state: present
+
+- name: Ensure httpd enabled and started
+  ansible.builtin.systemd:
+    name: httpd
+    enabled: true
+    state: started
+
+- name: Configure Apache php-fpm proxy (php-fpm.conf) with backup
+  ansible.builtin.template:
+    src: php-fpm.conf.j2
+    dest: /etc/httpd/conf.d/php-fpm.conf
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify: restart httpd
+
+- name: Enable SELinux boolean httpd_can_network_connect (persistent)
+  ansible.posix.seboolean:
+    name: httpd_can_network_connect
+    state: true
+    persistent: true
+
+- name: Ensure /var/www/html is reset (remove existing)
+  ansible.builtin.file:
+    path: /var/www/html
+    state: absent
+
+- name: Recreate /var/www/html
+  ansible.builtin.file:
+    path: /var/www/html
+    state: directory
+    owner: apache
+    group: apache
+    mode: "0755"
+
+- name: Download WordPress tarball
+  ansible.builtin.get_url:
+    url: "{{ wordpress_tarball_url }}"
+    dest: /tmp/latest.tar.gz
+    mode: "0644"
+  register: wp_download
+
+- name: Extract WordPress into /var/www/html
+  ansible.builtin.unarchive:
+    src: /tmp/latest.tar.gz
+    dest: /var/www/html
+    remote_src: true
+    extra_opts:
+      - --strip-components=1
+  register: wp_unarchive
+
+- name: Deploy wp-config.php (backup included)
+  ansible.builtin.template:
+    src: wp-config.php.j2
+    dest: /var/www/html/wp-config.php
+    owner: apache
+    group: apache
+    mode: "0644"
+    backup: true
+
+- name: Ensure permissions for /var/www/html
+  ansible.builtin.file:
+    path: /var/www/html
+    state: directory
+    owner: apache
+    group: apache
+    mode: "0755"
+    recurse: true
+
+- name: Create phpinfo page (info.php)
+  ansible.builtin.copy:
+    dest: /var/www/html/info.php
+    content: "<?php phpinfo(); ?>\n"
+    owner: apache
+    group: apache
+    mode: "0644"
+    backup: true
+
+- name: Backup and set DirectoryIndex (index.php first)
+  ansible.builtin.lineinfile:
+    path: /etc/httpd/conf/httpd.conf
+    regexp: "^DirectoryIndex\\s+"
+    line: "DirectoryIndex index.php index.html"
+    backup: true
+  notify: restart httpd
+
+# 失敗時に原因が見えるように：状態/ログ（トラブルシュートタグ）
+- name: (troubleshoot) httpd status
+  ansible.builtin.command: systemctl status httpd --no-pager -l
+  register: httpd_status
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show httpd status
+  ansible.builtin.debug:
+    var: httpd_status.stdout_lines
+  tags: [troubleshoot]
+
+- name: (troubleshoot) tail httpd error_log
+  ansible.builtin.command: tail -n 200 /var/log/httpd/error_log
+  register: httpd_error_log
+  changed_when: false
+  failed_when: false
+  tags: [troubleshoot]
+
+- name: (troubleshoot) show httpd error_log
+  ansible.builtin.debug:
+    var: httpd_error_log.stdout_lines
+  tags: [troubleshoot]
