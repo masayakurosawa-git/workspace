@@ -6,7 +6,6 @@
 以下の構成を **完全自動構築すること** を目的としています。
 
 ### 構成
-
 - WEB サーバ（Apache + WordPress）
 - AP サーバ
 - DB サーバ（MariaDB）
@@ -34,6 +33,77 @@ Ansible
 ├── DBロール
 └── 内部DNSロール
 ```
+```mermaid
+flowchart TD
+
+User[👨‍💻 Local Terminal] --> TF[Terraform Apply]
+
+TF --> EC2WEB[EC2 - WEB]
+TF --> EC2AP[EC2 - AP]
+TF --> EC2DB[EC2 - DB]
+TF --> EC2DNS[EC2 - Internal DNS]
+
+TF --> SG[Security Groups]
+TF --> IP[Public IP 自動取得]
+
+TF --> WAIT[wait_for_ssh.sh]
+WAIT --> ANS[Ansible Playbook]
+
+ANS --> WEBROLE[WEB Role]
+ANS --> APROLE[AP Role]
+ANS --> DBROLE[DB Role]
+ANS --> DNSROLE[DNS Role]
+
+WEBROLE --> WP[WordPress]
+DBROLE --> MariaDB[(MariaDB)]
+DNSROLE --> BIND[BIND DNS]
+
+WP --> Browser[🌐 Browser Access]
+```
+---
+</br>
+</br>
+
+
+## 🌍 ネットワーク構成図
+```mermaid
+flowchart LR
+
+Internet --> IGW[Internet Gateway]
+IGW --> WEB[WEB Server]
+
+WEB --> AP[AP Server]
+AP --> DB[(DB Server)]
+
+WEB --> DNS[Internal DNS]
+
+subgraph AWS VPC
+WEB
+AP
+DB
+DNS
+end
+```
+---
+</br>
+</br>
+
+
+## 🔄 実行フロー
+```mermaid
+sequenceDiagram
+participant User
+participant Terraform
+participant EC2
+participant Ansible
+
+User->>Terraform: terraform apply
+Terraform->>EC2: EC2作成
+Terraform->>Terraform: IP自動取得
+Terraform->>Ansible: SSH待機後実行
+Ansible->>EC2: 各ロール適用
+Ansible->>User: URL表示
+```
 ---
 </br>
 </br>
@@ -41,7 +111,6 @@ Ansible
 
 ## 🖥 必要環境
 ### ローカル環境
-
 - macOS / Linux
 - Terraform >= 1.5
 - Ansible >= 2.12
@@ -49,7 +118,6 @@ Ansible
 - AWS CLI（認証済み）
 
 ### AWS 側
-
 - IAMユーザー（EC2作成権限あり）
 - キーペア（例: `kurosawa_terraform.pem`）
 ---
@@ -90,6 +158,11 @@ terraform apply -var="my_ip_cidr=xxx.xxx.xxx.xxx/32"
 
 
 ## 🚀 実行手順
+【前提】
+```
+terraformディレクトリに移動すること。
+```
+
 ① 初期化
 ```bash
 terraform init
