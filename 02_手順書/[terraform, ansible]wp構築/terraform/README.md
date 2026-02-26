@@ -33,33 +33,6 @@ Ansible
 ├── DBロール
 └── 内部DNSロール
 ```
-```mermaid
-flowchart TD
-
-User[👨‍💻 Local Terminal] --> TF[Terraform Apply]
-
-TF --> EC2WEB[EC2 - WEB]
-TF --> EC2AP[EC2 - AP]
-TF --> EC2DB[EC2 - DB]
-TF --> EC2DNS[EC2 - Internal DNS]
-
-TF --> SG[Security Groups]
-TF --> IP[Public IP 自動取得]
-
-TF --> WAIT[wait_for_ssh.sh]
-WAIT --> ANS[Ansible Playbook]
-
-ANS --> WEBROLE[WEB Role]
-ANS --> APROLE[AP Role]
-ANS --> DBROLE[DB Role]
-ANS --> DNSROLE[DNS Role]
-
-WEBROLE --> WP[WordPress]
-DBROLE --> MariaDB[(MariaDB)]
-DNSROLE --> BIND[BIND DNS]
-
-WP --> Browser[🌐 Browser Access]
-```
 ---
 </br>
 </br>
