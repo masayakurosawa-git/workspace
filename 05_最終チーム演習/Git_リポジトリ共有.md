@@ -17,7 +17,15 @@ git add .
 git commit -m "docs: 初回コミット"
 ```
 
-## push → PR
+## pull
+ローカルとリモートの状態を揃える。
+```bash
+git pull --rebase origin main
+```
+
+## push
 ```bash
 git push -u origin main
 ```
+
+
